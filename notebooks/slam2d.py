@@ -97,7 +97,7 @@ def simulate(noise=None, plot=False):
         [9,10],
         # [-7,15],
     ])
-    lhi = l + np.random.randn(*l.shape)*0.01
+    lhi = l # + np.random.randn(*l.shape)*0.01
 
     hist = {
         't': [],
@@ -105,16 +105,18 @@ def simulate(noise=None, plot=False):
         'u': [],
         'odom': [],
         'z': [],
-        'xh': [xhi],
+        #'xh': [xhi],     # .append() seems to overwrite to same xhi every iteration
+        'xh': [],
         'lh': []
     }
+    hist['xh'].append(xhi.tolist())
 
     # l = truth
     # lh = estimate
     # lh_sym = symbolic estimate of landmarks
     
     J = 0
-    # Symbolic estimated states and landmark    
+    # Symbolic estimated states and landmark
     xh_sym = ca.SX.sym('xh0', 1, 2)
     lh_sym = ca.SX.sym('lh', len(l), 2)
     for i in range(10):
@@ -136,7 +138,7 @@ def simulate(noise=None, plot=False):
         hist['x'].append(xi)
         hist['u'].append(ui)
         hist['odom'].append(np.hstack([odom, i]))
-        hist['xh'].append(xhi)
+        hist['xh'].append(xhi.tolist())
         hist['lh'].append(lhi)
             
         # cost
@@ -163,7 +165,12 @@ def simulate(noise=None, plot=False):
         # Setup and run optimizer
         # Symbols/expressions
         nlp = {}                 # NLP declaration
-        nlp['x']= ca.vertcat(xh_sym, lh_sym).reshape(((xh_sym.shape[0]+lh_sym.shape[0])*2,1)) # decision vars
+        # print(xh_sym.shape)
+        # print(xh_sym.shape[0]*2)
+        x_temp = xh_sym.reshape((xh_sym.shape[0]*2,1))
+        l_temp = lh_sym.reshape((lh_sym.shape[0]*2,1))
+        nlp['x']= ca.vertcat(x_temp, l_temp)       # .reshape(((xh_sym.shape[0]+lh_sym.shape[0])*2,1)) # decision vars
+        # print(nlp['x'])
         nlp['f'] = J           # objective
         nlp['g'] = 0             # constraints
 
@@ -171,21 +178,28 @@ def simulate(noise=None, plot=False):
         opts = {'ipopt.print_level':0, 'print_time':0, 'ipopt.sb': 'yes'}
         F = ca.nlpsol('F','ipopt',nlp,opts);
         
-
-
         # Solve the problem using a guess
         # This uses original landmark/measure association (associates which landmark we think the measurement is measuring)
         x_input = np.hstack([np.array(hist['xh']).reshape(-1), lhi.reshape(-1)])
+        print(hist['xh'])
+        print(x_input)
         optim = F(x0=x_input)
 
         n_x = len(hist['x'])+1
         n_l = len(l)
-        print('i: ', i)
+        # print('i: ', i)
         print(optim['x'])
         xh = np.reshape(optim['x'][0:2*n_x], [n_x,2], order='F')
+        # print("xh: ", xh)
         lh = np.reshape(optim['x'][2*n_x:None], [n_l,2], order='F')
+        # print("lh: ", lh)
         
         xi_prev = xi
+        xhi = xh[-1,:]
+        
+        
+        
+        hist['xh'] = xh.tolist()
 
 
         
@@ -210,7 +224,7 @@ def simulate(noise=None, plot=False):
         plt.plot(x_odom_hist[:, 0], x_odom_hist[:, 1], 'g.', linewidth=3, label='odom')
         
         # plot best estimate
-        print(hist['xh'])
+        # print(hist['xh'])
         plt.plot(hist['xh'][:,0], hist['xh'][:,1], 'm.', linewidth=3, label='xh')
         
 
@@ -275,16 +289,16 @@ def build_cost(odom, z1, assoc, xh0, xh1, lh_sym):
     
     # covariance for measurement
     Q = ca.SX(2, 2) 
-    rng_std = 0.01
-    bearing_std = 0.01
+    rng_std = 1
+    bearing_std = 1
     Q[0, 0] = rng_std**2
     Q[1, 1] = bearing_std**2
     Q_I = ca.inv(Q)
 
     # covariance for odometry
     R = ca.SX(2, 2) 
-    odom_x_std = 10
-    odom_y_std = 10
+    odom_x_std = 5
+    odom_y_std = 5
     R[0, 0] = odom_x_std**2
     R[1, 1] = odom_y_std**2
     R_I = ca.inv(R)
