@@ -80,9 +80,9 @@ def measure_odom(x, x_prev, noise=None):
         odom += d*(noise['odom_std']*np.random.randn(2) + R@np.array([noise['odom_bx_bias'], noise['odom_by_bias']]))#right now this is only positive noise, only overestimates
     return list(odom)
 
-def simulate(noise=None, plot=False):
+def simulate(noise=None, plot=False, tf=10):
     xi = np.array([0.0, 0.0])
-    xhi = xi
+    xh = np.array([xi])
     xi_prev = xi
     dt = 2
 
@@ -95,7 +95,7 @@ def simulate(noise=None, plot=False):
         [9,10],
         # [-7,15],
     ])
-    lhi = l # + np.random.randn(*l.shape)*0.01
+    lh = l # + np.random.randn(*l.shape)*0.01
 
     hist = {
         't': [],
@@ -103,12 +103,11 @@ def simulate(noise=None, plot=False):
         'u': [],
         'odom': [],
         'z': [],
-        #'xh': [xhi],     # .append() seems to overwrite to same xhi every iteration
-        'xh': [],
+        'xh': [xh[0,:]],
         'lh': [],
         'J': []
     }
-    hist['xh'].append(xhi.tolist())
+    # hist['xh'].append(xi)
 
     # l = truth
     # lh = estimate
@@ -122,28 +121,26 @@ def simulate(noise=None, plot=False):
     for i in range(len(l)-1):
         lh_sym = ca.vertcat(lh_sym, ca.SX.sym('lh'+str(i+1), 1, 2))
 
-    for i in range(10):
-        ti = dt*i
+    t_vect = np.arange(0,tf,dt)
+    for i, ti in enumerate(t_vect):
 
-        # measure landmarks
-        z = measure_landmarks(xi, l, noise=noise)
+        
 
         # propagate
-        ui = np.array([np.cos(ti/10), np.sin(ti/10)])
+        if ti > 60:
+            ui = np.array([np.cos(ti/10), -np.sin(ti/10)])
+        else:
+            ui = np.array([np.cos(ti/10), np.sin(ti/10)])
         xi = g(xi_prev, ui, dt)
 
         # odometry
         odom = measure_odom(xi, xi_prev, noise=noise)
+
+        xh = np.vstack([xh, xh[-1,:]+odom])
         
-        xhi += odom
-                
-        hist['t'].append(ti)
-        hist['x'].append(xi)
-        hist['u'].append(ui)
-        hist['odom'].append(np.hstack([odom, i]))
-        hist['xh'].append(xhi.tolist())
-        hist['lh'].append(lhi)
-            
+        # measure landmarks
+        z = measure_landmarks(xi, l, noise=noise)
+        
         # cost
         
         # Call graph slam
@@ -154,9 +151,10 @@ def simulate(noise=None, plot=False):
         # For now assume previous associations are good
         # TODO: Need to fix. Cannot use truth landmark locations. Really should be lh
         
-        assoc = [ data_association(hist['xh'][-2], zi, lhi) for zi in z ]
+        assoc = [ data_association(xh[-1,:], zi, lh) for zi in z ]
         J += build_cost(
             odom=odom,
+            lh=lh,
             z1=z, 
             assoc=assoc,
             xh0=xh_sym[-2, :],
@@ -182,23 +180,28 @@ def simulate(noise=None, plot=False):
         
         # Solve the problem using a guess
         # This uses original landmark/measure association (associates which landmark we think the measurement is measuring)
-        x_input = np.hstack([np.array(hist['xh']).reshape(-1), lhi.reshape(-1)])
+        x_input = np.hstack([np.array(xh).reshape(-1), lh.reshape(-1)])
         optim = F(x0=x_input)
-        hist['J'].append(optim['f'])
+        
 
-        n_x = len(hist['x'])+1
+        n_t = len(xh)
         n_l = len(l)
-        xh = np.reshape(optim['x'][0:2*n_x], [n_x,2])
-        lh = np.reshape(optim['x'][2*n_x:None], [n_l,2])
+        xh = np.reshape(optim['x'][0:2*n_t], [n_t,2])    # Best estimate of all states for all times at time i
+        lh = np.reshape(optim['x'][2*n_t:None], [n_l,2]) # Best estimate of all landmarks at time i
         
-        xi_prev = xi
-        xhi = xh[-1,:]
-        
-        hist['xh'] = xh.tolist()
-        hist['lh'] = lh.tolist() 
-
+        # Simulated data history
+        hist['t'].append(ti)      # History of current time
+        hist['x'].append(xi)      # History of current state at each time
+        hist['u'].append(ui)      # History of current input at each time
+        hist['odom'].append(np.hstack([odom, i]))     # History of current odometry reading at each time
         for zi in z:
-            hist['z'].append(np.hstack([zi, i]))
+            hist['z'].append(np.hstack([zi, i]))      # History of measurements recorded at each time step
+            
+        # Estimator history
+        hist['xh'].append(xh[-1,:])    # History of current state estimate at each time
+        hist['lh'].append(lh)     # History of location landmark estimate at each time
+        hist['J'].append(optim['f'])   # History of minimized cost at each time
+        
 
     for key in hist.keys():
         hist[key] = np.array(hist[key])
@@ -288,7 +291,7 @@ def J_graph_slam(hist,x_meas,landmarks):
         return J
     
 
-def build_cost(odom, z1, assoc, xh0, xh1, lh_sym):
+def build_cost(odom, lh, z1, assoc, xh0, xh1, lh_sym):
     """
     @param odom : [delta_x, delta_y]
     @param z : [rng, bearing] vertically stacked
@@ -318,6 +321,14 @@ def build_cost(odom, z1, assoc, xh0, xh1, lh_sym):
     R[0, 0] = odom_x_std**2
     R[1, 1] = odom_y_std**2
     R_I = ca.inv(R)
+    
+    # covariance for landmark
+    Ql = ca.SX(2, 2) 
+    land_x_std = 0.1
+    land_y_std = 0.1
+    Ql[0, 0] = land_x_std**2
+    Ql[1, 1] = land_y_std**2
+    Ql_I = ca.inv(Ql)
                         
     # compute cost
     # -------------------
@@ -343,6 +354,19 @@ def build_cost(odom, z1, assoc, xh0, xh1, lh_sym):
         e_z = z1[j, :2] - z_pred
         # cost
         J += e_z.T@Q_I@e_z
+        
+    # Landmark moving cost
+    for j in range(len(lh)):
+        l = lh[j,:]
+        l_sym = lh_sym[j,:]
+        
+        # error
+        e_l = ca.SX.zeros(1,2)
+        e_l[0] = l[0] - l_sym[0]
+        e_l[1] = l[1] - l_sym[1]
+        # cost
+        J += e_l@Q_I@e_l.T
+    
         
     return J
 
