@@ -85,21 +85,22 @@ def simulate(noise=None, plot=False, tf=10):
     xh = np.array([xi])
     xi_prev = xi
     dt = 2
-
     # landmarks
     l = np.array([
         [0, 2],
         [4, 6],
         [9, 1],
+        [4,2],
         [9, 1.5],
         [9,10],
+        [-5,15],
         # [-7,15],
     ])
     lh = l # + np.random.randn(*l.shape)*0.01
 
     hist = {
         't': [],
-        'x': [],
+        'x': [xi],
         'u': [],
         'odom': [],
         'z': [],
@@ -123,23 +124,22 @@ def simulate(noise=None, plot=False, tf=10):
 
     t_vect = np.arange(0,tf,dt)
     for i, ti in enumerate(t_vect):
-
+        #
         
-
+           # measure landmarks
+        z = measure_landmarks(xi, l, noise=noise)
         # propagate
         if ti > 60:
             ui = np.array([np.cos(ti/10), -np.sin(ti/10)])
         else:
             ui = np.array([np.cos(ti/10), np.sin(ti/10)])
         xi = g(xi_prev, ui, dt)
-
-        # odometry
+        # od         [9.00000000e+00, 1.00000000e+00],ometry
         odom = measure_odom(xi, xi_prev, noise=noise)
 
         xh = np.vstack([xh, xh[-1,:]+odom])
         
-        # measure landmarks
-        z = measure_landmarks(xi, l, noise=noise)
+     
         
         # cost
         
@@ -151,8 +151,8 @@ def simulate(noise=None, plot=False, tf=10):
         # For now assume previous associations are good
         # TODO: Need to fix. Cannot use truth landmark locations. Really should be lh
         
-        assoc = [ data_association(xh[-1,:], zi, lh) for zi in z ]
-        J += build_cost(
+        assoc = [ data_association(xh[-2,:], zi, lh) for zi in z ]
+        J+= build_cost(
             odom=odom,
             lh=lh,
             z1=z, 
@@ -188,7 +188,8 @@ def simulate(noise=None, plot=False, tf=10):
         n_l = len(l)
         xh = np.reshape(optim['x'][0:2*n_t], [n_t,2])    # Best estimate of all states for all times at time i
         lh = np.reshape(optim['x'][2*n_t:None], [n_l,2]) # Best estimate of all landmarks at time i
-        
+        xi_prev=xi #set previous state for next loop
+
         # Simulated data history
         hist['t'].append(ti)      # History of current time
         hist['x'].append(xi)      # History of current state at each time
@@ -200,7 +201,7 @@ def simulate(noise=None, plot=False, tf=10):
         # Estimator history
         hist['xh'].append(xh[-1,:])    # History of current state estimate at each time
         hist['lh'].append(lh)     # History of location landmark estimate at each time
-        hist['J'].append(optim['f'])   # History of minimized cost at each time
+        hist['J'].append(J)   # History of minimized cost at each time
         
 
     for key in hist.keys():
@@ -223,7 +224,7 @@ def simulate(noise=None, plot=False, tf=10):
         plt.plot(l[:, 0], l[:, 1], 'bo', label='landmarks')
         plt.plot(hist['x'][:, 0], hist['x'][:, 1], 'r.', label='states', markersize=10)
 
-        # plot odom
+        #plot odom
         x_odom = np.array([0, 0], dtype=float)
         x_odom_hist = [x_odom]
         for odom in hist['odom']:
@@ -232,12 +233,15 @@ def simulate(noise=None, plot=False, tf=10):
         x_odom_hist = np.array(x_odom_hist)
         plt.plot(x_odom_hist[:, 0], x_odom_hist[:, 1], 'g.', linewidth=3, label='odom')
         
-        # plot best estimate
-        plt.plot(hist['xh'][:,0], hist['xh'][:,1], 'm.', linewidth=3, label='xh')
+        # plot best estimate history from each time step
+        plt.plot(hist['xh'][:,0], hist['xh'][:,1], 'm.', linewidth=3, label='optimal x for each time')
+        
+        # plot best estimate from the final time step
+        plt.plot(xh[:,0], xh[:,1], 'y.', linewidth=3, label='optimal x for all time')
         
         # plot best estimate landmarks
-        plt.plot(hist['lh'][:, 0], hist['lh'][:, 1], 'ko', label='lh')
-        
+        plt.plot(hist['lh'][-1,:, 0], hist['lh'][-1,:, 1], 'ko', label='lh')
+        #plt.plot(hist['lh'][-1])
         # plot measurements
         for rng, bearing, xi in hist['z']:
             xi = int(xi)
@@ -308,24 +312,24 @@ def build_cost(odom, lh, z1, assoc, xh0, xh1, lh_sym):
     
     # covariance for measurement
     Q = ca.SX(2, 2) 
-    rng_std = 1
-    bearing_std = 1
+    rng_std = .5
+    bearing_std = .5
     Q[0, 0] = rng_std**2
     Q[1, 1] = bearing_std**2
     Q_I = ca.inv(Q)
 
     # covariance for odometry
     R = ca.SX(2, 2) 
-    odom_x_std = 1
-    odom_y_std = 1
+    odom_x_std = 3
+    odom_y_std = 3
     R[0, 0] = odom_x_std**2
     R[1, 1] = odom_y_std**2
     R_I = ca.inv(R)
     
     # covariance for landmark
     Ql = ca.SX(2, 2) 
-    land_x_std = 0.1
-    land_y_std = 0.1
+    land_x_std = 1
+    land_y_std = 1
     Ql[0, 0] = land_x_std**2
     Ql[1, 1] = land_y_std**2
     Ql_I = ca.inv(Ql)
@@ -359,42 +363,12 @@ def build_cost(odom, lh, z1, assoc, xh0, xh1, lh_sym):
     for j in range(len(lh)):
         l = lh[j,:]
         l_sym = lh_sym[j,:]
-        
         # error
         e_l = ca.SX.zeros(1,2)
         e_l[0] = l[0] - l_sym[0]
         e_l[1] = l[1] - l_sym[1]
         # cost
-        J += e_l@Q_I@e_l.T
+        J += e_l@Ql_I@e_l.T
     
         
     return J
-
-def plot_me(sim):
-    hist = sim['hist']
-    landmarks = sim['landmarks']
-    fig = plt.figure(1)
-    plt.plot(landmarks[:, 0], landmarks[:, 1], 'bo', label='landmarks')
-    plt.plot(hist['x'][:, 0], hist['x'][:, 1], 'r.', label='states', markersize=10)
-    # plot odom
-    x_odom = np.array([0, 0], dtype=float)
-    x_odom_hist = [x_odom]
-    for odom in hist['odom']:
-        x_odom = np.array(x_odom) + np.array(odom[:2])
-        x_odom_hist.append(x_odom)
-    x_odom_hist = np.array(x_odom_hist)
-    plt.plot(x_odom_hist[:, 0], x_odom_hist[:, 1], 'g.', linewidth=3, label='odom')
-    # plot measurements
-    for rng, bearing, xi in hist['z']:
-        xi = int(xi)
-        x = x_odom_hist[xi, :]
-        plt.arrow(x[0], x[1], rng*np.cos(bearing) , rng*np.sin(bearing), width=0.1,
-                      length_includes_head=True)
-        
-        
-    # plt.axis([0, 10, 0, 10])
-    plt.axis([5, 10, 0, 2])
-    plt.grid()
-    plt.legend()
-    plt.axis('equal');
-    return
