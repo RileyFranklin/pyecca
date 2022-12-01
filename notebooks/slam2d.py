@@ -124,9 +124,8 @@ def simulate(noise=None, plot=False, tf=10):
 
     t_vect = np.arange(0,tf,dt)
     for i, ti in enumerate(t_vect):
-        #
         
-           # measure landmarks
+        # measure landmarks
         z = measure_landmarks(xi, l, noise=noise)
         # propagate
         if ti > 60:
@@ -134,12 +133,10 @@ def simulate(noise=None, plot=False, tf=10):
         else:
             ui = np.array([np.cos(ti/10), np.sin(ti/10)])
         xi = g(xi_prev, ui, dt)
-        # od         [9.00000000e+00, 1.00000000e+00],ometry
+        # odometry
         odom = measure_odom(xi, xi_prev, noise=noise)
 
         xh = np.vstack([xh, xh[-1,:]+odom])
-        
-     
         
         # cost
         
@@ -152,7 +149,7 @@ def simulate(noise=None, plot=False, tf=10):
         # TODO: Need to fix. Cannot use truth landmark locations. Really should be lh
         
         assoc = [ data_association(xh[-2,:], zi, lh) for zi in z ]
-        J+= build_cost(
+        J += build_cost(
             odom=odom,
             lh=lh,
             z1=z, 
@@ -201,7 +198,7 @@ def simulate(noise=None, plot=False, tf=10):
         # Estimator history
         hist['xh'].append(xh[-1,:])    # History of current state estimate at each time
         hist['lh'].append(lh)     # History of location landmark estimate at each time
-        hist['J'].append(J)   # History of minimized cost at each time
+        hist['J'].append(float(optim['f']))   # History of minimized cost at each time
         
 
     for key in hist.keys():
