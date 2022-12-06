@@ -50,9 +50,9 @@ def h(x, m, noise=None):
     m_range = d
     m_bearing = np.arctan2(dm[1], dm[0])
     if noise is not None:
-        m_bearing += noise['bearing_std']*(np.random.randn()-.5)/.5 #Is the flat addition of a random variable appropriate or should we scale with magnitude of bearing? also we changed so that the bearing noise is positive or negative
+        m_bearing += noise['bearing_std']*(np.random.randn()-.5)/.5
             
-        m_range += d*noise['range_std']*np.random.randn() # This may shrink large range to be below range_max. Need to fix
+        m_range += d*noise['range_std']*np.random.randn()
     return [m_range, m_bearing]
 
 def measure_landmarks(x, landmarks, noise=None, range_max=4):
@@ -85,19 +85,20 @@ def simulate(noise=None, plot=False, tf=10):
     xh = np.array([xi])
     xi_prev = xi
     dt = 2
+    lim=.4
+    liml=.2
     # landmarks
     l = np.array([
         [0, 2],
-        [4, 6],
-        [9, 1],
+        [7, 1],
         [4,2],
-        [9, 1.5],
+        [4,6],
+        [9,1],
+        [9,1.5],
         [9,10],
         [-5,15],
-        # [-7,15],
     ])
-    lh = l # + np.random.randn(*l.shape)*0.01
-
+    lh = l 
     hist = {
         't': [],
         'x': [xi],
@@ -106,10 +107,12 @@ def simulate(noise=None, plot=False, tf=10):
         'z': [],
         'xh': [xh[0,:]],
         'lh': [],
-        'J': []
+        'J': [],
+        'xhf': [],
+        'g': [],
+        'g_sym': [],
+        'odom_array':[],
     }
-    # hist['xh'].append(xi)
-
     # l = truth
     # lh = estimate
     # lh_sym = symbolic estimate of landmarks
@@ -117,14 +120,12 @@ def simulate(noise=None, plot=False, tf=10):
     J = 0
     # Symbolic estimated states and landmark
     xh_sym = ca.SX.sym('xh0', 1, 2)
-    
     lh_sym = ca.SX.sym('lh0', 1, 2)
     for i in range(len(l)-1):
         lh_sym = ca.vertcat(lh_sym, ca.SX.sym('lh'+str(i+1), 1, 2))
 
     t_vect = np.arange(0,tf,dt)
     for i, ti in enumerate(t_vect):
-        
         # measure landmarks
         z = measure_landmarks(xi, l, noise=noise)
         # propagate
@@ -137,7 +138,6 @@ def simulate(noise=None, plot=False, tf=10):
         odom = measure_odom(xi, xi_prev, noise=noise)
 
         xh = np.vstack([xh, xh[-1,:]+odom])
-        
         # cost
         
         # Call graph slam
@@ -157,32 +157,36 @@ def simulate(noise=None, plot=False, tf=10):
             xh0=xh_sym[-2, :],
             xh1=xh_sym[-1, :],
             lh_sym = lh_sym)
-        
         # ca.Function('f_J', [x, l], [J], ['x', 'l'], ['J'])
-        
+        #constr=constraints(xh,xh_sym,lh,lh_sym,i,lim,liml)
+    
         # Setup and run optimizer
         # Symbols/expressions
         nlp = {}                 # NLP declaration
-        # print(xh_sym.shape)
-        # print(xh_sym.shape[0]*2)
         x_temp = xh_sym.T.reshape((xh_sym.shape[0]*2,1))
         l_temp = lh_sym.T.reshape((lh_sym.shape[0]*2,1))
         nlp['x']= ca.vertcat(x_temp, l_temp)       # decision vars
         nlp['f'] = J           # objective
-        nlp['g'] = 0             # constraints
-
+        nlp['g'] = 0#constr             # constraints
+    
         # Create solver instance
-        opts = {'ipopt.print_level':0, 'print_time':0, 'ipopt.sb': 'yes'}
-        F = ca.nlpsol('F','ipopt',nlp,opts);
-        
+        opts = {'min_step_size': 1e-6,
+        'tol_du': 1e-4,
+        'tol_pr': 1e-4,}
+        opts["qpsol_options"] = {"printLevel":None}
+        F = ca.nlpsol('F','sqpmethod',nlp,opts);
         # Solve the problem using a guess
         # This uses original landmark/measure association (associates which landmark we think the measurement is measuring)
         x_input = np.hstack([np.array(xh).reshape(-1), lh.reshape(-1)])
         optim = F(x0=x_input)
-        
-
+        print(optim)
         n_t = len(xh)
         n_l = len(l)
+        #geval=constraints_eval(xh,np.reshape(optim['x'][0:2*n_t], [n_t,2]),lh,np.reshape(optim['x'][2*n_t:None], [n_l,2]),i,lim,liml)
+        # print(xh)
+        # print(np.reshape(optim['x'][0:2*n_t], [n_t,2]))
+        # print("g evaluation")
+        # print(geval)
         xh = np.reshape(optim['x'][0:2*n_t], [n_t,2])    # Best estimate of all states for all times at time i
         lh = np.reshape(optim['x'][2*n_t:None], [n_l,2]) # Best estimate of all landmarks at time i
         xi_prev=xi #set previous state for next loop
@@ -194,32 +198,28 @@ def simulate(noise=None, plot=False, tf=10):
         hist['odom'].append(np.hstack([odom, i]))     # History of current odometry reading at each time
         for zi in z:
             hist['z'].append(np.hstack([zi, i]))      # History of measurements recorded at each time step
-            
         # Estimator history
         hist['xh'].append(xh[-1,:])    # History of current state estimate at each time
         hist['lh'].append(lh)     # History of location landmark estimate at each time
         hist['J'].append(float(optim['f']))   # History of minimized cost at each time
-        
-
+        hist['xhf'] = xh
+        hist['g'] = 0#geval
+        #hist['g_sym']=constr
     for key in hist.keys():
+        if key =="g":
+            break
         hist[key] = np.array(hist[key])
     
     # Print optimized xh and odom for comparison
-    # print(hist['xh'])
     # Convert odom to cartesian coordinates
     xodom = np.zeros([len(hist['xh']),2])
     for i in range(len(hist['odom'])):
         xodom[i+1,:] = xodom[i,:] + hist['odom'][i,0:2]
-#     print(xodom)
-#     print(hist['xh']-xodom)
-    
-#     print(l)
-#     print(hist['lh'])
 
     if plot:
         fig = plt.figure(1)
-        plt.plot(l[:, 0], l[:, 1], 'bo', label='landmarks')
-        plt.plot(hist['x'][:, 0], hist['x'][:, 1], 'r.', label='states', markersize=10)
+        plt.plot(l[:, 0], l[:, 1], 'bo', label='landmarks',markersize=15)
+        plt.plot(hist['x'][:, 0], hist['x'][:, 1], 'r.', label='states', markersize=15)
 
         #plot odom
         x_odom = np.array([0, 0], dtype=float)
@@ -228,38 +228,46 @@ def simulate(noise=None, plot=False, tf=10):
             x_odom = np.array(x_odom) + np.array(odom[:2])
             x_odom_hist.append(x_odom)
         x_odom_hist = np.array(x_odom_hist)
-        plt.plot(x_odom_hist[:, 0], x_odom_hist[:, 1], 'g.', linewidth=3, label='odom')
-        
+        plt.plot(x_odom_hist[:, 0], x_odom_hist[:, 1], 'g.', linewidth=4, label='odom',markersize=15)
+        hist['odom_array']=x_odom_hist
         # plot best estimate history from each time step
-        plt.plot(hist['xh'][:,0], hist['xh'][:,1], 'm.', linewidth=3, label='optimal x for each time')
+        plt.plot(hist['xh'][:,0], hist['xh'][:,1], 'm.', linewidth=4, label='optimal x for each time',markersize=15)
         
         # plot best estimate from the final time step
-        plt.plot(xh[:,0], xh[:,1], 'y.', linewidth=3, label='optimal x for all time')
+        plt.plot(xh[:,0], xh[:,1], 'y.', linewidth=3, label='optimal x for all time',markersize=15)
         
         # plot best estimate landmarks
-        plt.plot(hist['lh'][-1,:, 0], hist['lh'][-1,:, 1], 'ko', label='lh')
+        plt.plot(hist['lh'][-1,:, 0], hist['lh'][-1,:, 1], 'ko', label='lh',markersize=10)
         #plt.plot(hist['lh'][-1])
         # plot measurements
+        
         for rng, bearing, xi in hist['z']:
             xi = int(xi)
-            x = hist['xh'][xi, :]
+            #x = hist['xh'][xi, :]
+            x=xh[xi,:]
             plt.arrow(x[0], x[1], rng*np.cos(bearing) , rng*np.sin(bearing), width=0.1,
                           length_includes_head=True)
-        
+        plt.axis([5, 10, 0, 2])
+        plt.grid()
+        plt.legend()
+        plt.axis('equal');
+        fig = plt.figure(2)
+        plt.plot(l[:, 0], l[:, 1], 'bo', label='landmarks',markersize=10)
+        plt.plot(hist['x'][:, 0], hist['x'][:, 1], 'r.', label='states', markersize=15)
+        plt.plot(x_odom_hist[:, 0], x_odom_hist[:, 1], 'g.',label='odom',markersize=15)
 
         # # plot measurements
-        # for rng, bearing, xi in hist['z']:
-        #     xi = int(xi)
-        #     x = x_odom_hist[xi, :]
-        #     plt.arrow(x[0], x[1], rng*np.cos(bearing) , rng*np.sin(bearing), width=0.1,
-        #                   length_includes_head=True)
+        for rng, bearing, xi in hist['z']:
+            xi = int(xi)
+            x = x_odom_hist[xi, :]
+            plt.arrow(x[0], x[1], rng*np.cos(bearing) , rng*np.sin(bearing), width=0.1,
+                          length_includes_head=True)
 
         # plt.axis([0, 10, 0, 10])
         plt.axis([5, 10, 0, 2])
         plt.grid()
         plt.legend()
         plt.axis('equal');
-
     return locals()
 
 def J_graph_slam(hist,x_meas,landmarks):
@@ -291,7 +299,34 @@ def J_graph_slam(hist,x_meas,landmarks):
         J += e_z.T@Q_I@e_z
         return J
     
+def constraints(xh, xh_sym,lh,lh_sym,i,lim,lim_l):
+    const = ca.SX.zeros(1,1)
+    dx = ca.SX.zeros(1,2)
+    for j in range(i+1):
+        x=xh[j,:]
+        x_sym=xh_sym[j,:]
+        dx=[x_sym[0]-x[0],x_sym[1]-x[1]]
+        const =ca.vertcat(const, ca.fabs(dx[0])-lim,ca.fabs(dx[1])-lim)
+    for j in range(len(lh)):
+        l=lh[j,:]
+        l_sym=lh_sym[j,:]
+        dl=[l_sym[0]-l[0],l_sym[1]-l[1]]
+        const =ca.vertcat(const, ca.fabs(dl[0])-lim_l,ca.fabs(dl[1])-lim_l)
+    return const
 
+def constraints_eval(xh, xh_sym,lh,lh_sym,i,lim,lim_l):
+    const=[0]
+    for j in range(i+2):
+        x=xh[j,:]
+        x_sym=xh_sym[j,:]
+        dx=[x_sym[0]-x[0],x_sym[1]-x[1]]
+        const =ca.vertcat(const, ca.fabs(dx[0])-lim,ca.fabs(dx[1])-lim) 
+    for j in range(len(lh)):
+        l=lh[j,:]
+        l_sym=lh_sym[j,:]
+        dl=[l_sym[0]-l[0],l_sym[1]-l[1]]
+        const =ca.vertcat(const, ca.fabs(dl[0])-lim_l,ca.fabs(dl[1])-lim_l)
+    return const
 def build_cost(odom, lh, z1, assoc, xh0, xh1, lh_sym):
     """
     @param odom : [delta_x, delta_y]
@@ -302,11 +337,8 @@ def build_cost(odom, lh, z1, assoc, xh0, xh1, lh_sym):
     """
     # constants
     # -------------------------------------------------------------
-
-    
     # build_cost(prev_J, prev_xstar, curr_odom, curr_z, 
     # prev_J needs to be ca.Function
-    
     # covariance for measurement
     Q = ca.SX(2, 2) 
     rng_std = .5
