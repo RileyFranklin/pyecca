@@ -157,6 +157,14 @@ def simulate(noise=None, plot=False, tf=10):
             xh0=xh_sym[-2, :],
             xh1=xh_sym[-1, :],
             lh_sym = lh_sym)
+        J_land = build_cost_land(
+            odom=odom,
+            lh=lh,
+            z1=z, 
+            assoc=assoc,
+            xh0=xh_sym[-2, :],
+            xh1=xh_sym[-1, :],
+            lh_sym = lh_sym)
         
         # ca.Function('f_J', [x, l], [J], ['x', 'l'], ['J'])
         
@@ -168,7 +176,7 @@ def simulate(noise=None, plot=False, tf=10):
         x_temp = xh_sym.T.reshape((xh_sym.shape[0]*2,1))
         l_temp = lh_sym.T.reshape((lh_sym.shape[0]*2,1))
         nlp['x']= ca.vertcat(x_temp, l_temp)       # decision vars
-        nlp['f'] = J           # objective
+        nlp['f'] = J+J_land      # objective
         nlp['g'] = 0             # constraints
 
         # Create solver instance
@@ -356,6 +364,45 @@ def build_cost(odom, lh, z1, assoc, xh0, xh1, lh_sym):
         # cost
         J += e_z.T@Q_I@e_z
         
+    # # Landmark moving cost
+    # for j in range(len(lh)):
+    #     l = lh[j,:]
+    #     l_sym = lh_sym[j,:]
+    #     # error
+    #     e_l = ca.SX.zeros(1,2)
+    #     e_l[0] = l[0] - l_sym[0]
+    #     e_l[1] = l[1] - l_sym[1]
+    #     # cost
+    #     J += e_l@Ql_I@e_l.T
+    
+        
+    return J
+
+def build_cost_land(odom, lh, z1, assoc, xh0, xh1, lh_sym):
+    """
+    @param odom : [delta_x, delta_y]
+    @param z : [rng, bearing] vertically stacked
+    @param assoc : [ li ] landmark  associations for z, vertically stacked
+    @param xh_sym : symbolic states
+    @param lh_sym : symbolic landmarks
+    """
+    # constants
+    # -------------------------------------------------------------
+
+    # build_cost(prev_J, prev_xstar, curr_odom, curr_z, 
+    # prev_J needs to be ca.Function
+    
+    # covariance for landmark
+    Ql = ca.SX(2, 2) 
+    land_x_std = 1
+    land_y_std = 1
+    Ql[0, 0] = land_x_std**2
+    Ql[1, 1] = land_y_std**2
+    Ql_I = ca.inv(Ql)
+                        
+    # compute cost
+    J = ca.SX.zeros(1,1)
+        
     # Landmark moving cost
     for j in range(len(lh)):
         l = lh[j,:]
@@ -366,6 +413,5 @@ def build_cost(odom, lh, z1, assoc, xh0, xh1, lh_sym):
         e_l[1] = l[1] - l_sym[1]
         # cost
         J += e_l@Ql_I@e_l.T
-    
         
     return J
