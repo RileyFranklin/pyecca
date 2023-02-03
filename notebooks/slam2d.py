@@ -80,7 +80,7 @@ def measure_odom(x, x_prev, noise=None):
         odom += d*(noise['odom_std']*np.random.randn(2) + R@np.array([noise['odom_bx_bias'], noise['odom_by_bias']]))#right now this is only positive noise, only overestimates
     return list(odom)
 
-def simulate(noise=None, plot=False, tf=10):
+def simulate(noise=None, plot=False, sf=False, tf=10):
     xi = np.array([0.0, 0.0])
     xh = np.array([xi])
     xi_prev = xi
@@ -106,7 +106,8 @@ def simulate(noise=None, plot=False, tf=10):
         'z': [],
         'xh': [xh[0,:]],
         'lh': [],
-        'J': []
+        'J': [],
+        'assoc': [],
     }
     # hist['xh'].append(xi)
 
@@ -149,50 +150,56 @@ def simulate(noise=None, plot=False, tf=10):
         # TODO: Need to fix. Cannot use truth landmark locations. Really should be lh
         
         assoc = [ data_association(xh[-2,:], zi, lh) for zi in z ]
-        J += build_cost(
-            odom=odom,
-            lh=lh,
-            z1=z, 
-            assoc=assoc,
-            xh0=xh_sym[-2, :],
-            xh1=xh_sym[-1, :],
-            lh_sym = lh_sym)
-        J_land = build_cost_land(
-            odom=odom,
-            lh=lh,
-            z1=z, 
-            assoc=assoc,
-            xh0=xh_sym[-2, :],
-            xh1=xh_sym[-1, :],
-            lh_sym = lh_sym)
         
-        # ca.Function('f_J', [x, l], [J], ['x', 'l'], ['J'])
+        if sf:
+            lm=lh[-1]
+            odom=odom[:,0:2]
+            optim = SF2D.optimize(xh,lh,odom,z)
+            xh = optim.optimized_values['poses']
+            lh = optim.optimized_values['poses']
+        else:
+            J += build_cost(
+                odom=odom,
+                lh=lh,
+                z1=z, 
+                assoc=assoc,
+                xh0=xh_sym[-2, :],
+                xh1=xh_sym[-1, :],
+                lh_sym = lh_sym)
+            J_land = build_cost_land(
+                odom=odom,
+                lh=lh,
+                z1=z, 
+                assoc=assoc,
+                xh0=xh_sym[-2, :],
+                xh1=xh_sym[-1, :],
+                lh_sym = lh_sym)
         
-        # Setup and run optimizer
-        # Symbols/expressions
-        nlp = {}                 # NLP declaration
-        # print(xh_sym.shape)
-        # print(xh_sym.shape[0]*2)
-        x_temp = xh_sym.T.reshape((xh_sym.shape[0]*2,1))
-        l_temp = lh_sym.T.reshape((lh_sym.shape[0]*2,1))
-        nlp['x']= ca.vertcat(x_temp, l_temp)       # decision vars
-        nlp['f'] = J+J_land      # objective
-        nlp['g'] = 0             # constraints
+            # ca.Function('f_J', [x, l], [J], ['x', 'l'], ['J'])
 
-        # Create solver instance
-        opts = {'ipopt.print_level':0, 'print_time':0, 'ipopt.sb': 'yes'}
-        F = ca.nlpsol('F','ipopt',nlp,opts);
-        
-        # Solve the problem using a guess
-        # This uses original landmark/measure association (associates which landmark we think the measurement is measuring)
-        x_input = np.hstack([np.array(xh).reshape(-1), lh.reshape(-1)])
-        optim = F(x0=x_input)
-        
+            # Setup and run optimizer
+            # Symbols/expressions
+            nlp = {}                 # NLP declaration
+            # print(xh_sym.shape)
+            # print(xh_sym.shape[0]*2)
+            x_temp = xh_sym.T.reshape((xh_sym.shape[0]*2,1))
+            l_temp = lh_sym.T.reshape((lh_sym.shape[0]*2,1))
+            nlp['x']= ca.vertcat(x_temp, l_temp)       # decision vars
+            nlp['f'] = J+J_land      # objective
+            nlp['g'] = 0             # constraints
 
-        n_t = len(xh)
-        n_l = len(l)
-        xh = np.reshape(optim['x'][0:2*n_t], [n_t,2])    # Best estimate of all states for all times at time i
-        lh = np.reshape(optim['x'][2*n_t:None], [n_l,2]) # Best estimate of all landmarks at time i
+            # Create solver instance
+            opts = {'ipopt.print_level':0, 'print_time':0, 'ipopt.sb': 'yes'}
+            F = ca.nlpsol('F','ipopt',nlp,opts);
+
+            # Solve the problem using a guess
+            # This uses original landmark/measure association (associates which landmark we think the measurement is measuring)
+            x_input = np.hstack([np.array(xh).reshape(-1), lh.reshape(-1)])
+            optim = F(x0=x_input)
+            n_t = len(xh)
+            n_l = len(l)
+            xh = np.reshape(optim['x'][0:2*n_t], [n_t,2])    # Best estimate of all states for all times at time i
+            lh = np.reshape(optim['x'][2*n_t:None], [n_l,2]) # Best estimate of all landmarks at time i
         xi_prev=xi #set previous state for next loop
 
         # Simulated data history
@@ -207,7 +214,9 @@ def simulate(noise=None, plot=False, tf=10):
         hist['xh'].append(xh[-1,:])    # History of current state estimate at each time
         hist['lh'].append(lh)     # History of location landmark estimate at each time
         hist['J'].append(float(optim['f']))   # History of minimized cost at each time
-        
+        for i in range(len(assoc)):
+            hist['assoc'].append(assoc[i])
+            
 
     for key in hist.keys():
         hist[key] = np.array(hist[key])
