@@ -1,6 +1,14 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import casadi as ca
+import SF2D
+
+import symforce
+from symforce.values import Values
+from symforce.opt.factor import Factor
+import symforce.symbolic as sf
+from symforce.opt.optimizer import Optimizer
+
 
 def g(x: np.array, u: np.array, dt: float):
     """
@@ -80,7 +88,7 @@ def measure_odom(x, x_prev, noise=None):
         odom += d*(noise['odom_std']*np.random.randn(2) + R@np.array([noise['odom_bx_bias'], noise['odom_by_bias']]))#right now this is only positive noise, only overestimates
     return list(odom)
 
-def simulate(noise=None, plot=False, sf=False, tf=10):
+def simulate(noise=None, plot=False, symf=False, tf=10):
     xi = np.array([0.0, 0.0])
     xh = np.array([xi])
     xi_prev = xi
@@ -88,6 +96,7 @@ def simulate(noise=None, plot=False, sf=False, tf=10):
     # landmarks
     l = np.array([
         [0, 2],
+        [1, 1],
         [4, 6],
         [9, 1],
         [4,2],
@@ -151,12 +160,26 @@ def simulate(noise=None, plot=False, sf=False, tf=10):
         
         assoc = [ data_association(xh[-2,:], zi, lh) for zi in z ]
         
-        if sf:
-            lm=lh[-1]
-            odom=odom[:,0:2]
-            optim = SF2D.optimize(xh,lh,odom,z)
+        if symf:
+            print(i)
+            z_factor = np.zeros([len(z), 4])
+            for lcv in range(len(z)):
+                z_factor[lcv, :] = np.hstack([z[lcv,:], i, assoc[lcv]])
+
+            if ti==0:
+                initial_values = Values(
+                    poses=[sf.V2(i,j) for i,j in xh],
+                    landmarks=[sf.V2(i,j) for i,j in lh],
+                    odom=[sf.V2(i,j) for i,j in [odom]],
+                    meas=[sf.V2(i,j) for i,j in z],
+                    epsilon=sf.numeric_epsilon,
+                )
+                factors = []
+            initial_values = SF2D.update_init_values(initial_values, xh[-1,:], lh, odom, z)
+            factors = SF2D.update_factor_graph(factors, xh, lh, odom, z_factor)
+            optim = SF2D.optimize(factors,initial_values)
             xh = optim.optimized_values['poses']
-            lh = optim.optimized_values['poses']
+            lh = optim.optimized_values['landmarks']
         else:
             J += build_cost(
                 odom=odom,

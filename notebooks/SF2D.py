@@ -45,20 +45,33 @@ def odometry_residual(
         # cost
         J = e_x@R_I@e_x.T
         return sf.V1(J)
-
-def optimize(x,lm,odom,z):
+def update_init_values(initial_values, x, lm, odom, z):
+    # initial_values: Previous initial value dictionary generated
+    # x: Newest x,y coordinate from rover np.array([x, y]) that will be appended to old array
+    # lm: Newest SET of landmarks np.array([[x1,y1],[x2,y2],...]) that will replace old landmarks
+    # odom: Newest x,y odom from rover np.array([x, y]) that will be appended to old array
+    # z: Newest range, bearing, pose, landmark np.array([]) that will be appended to old array
+    
+    x_new = np.vstack([np.array(initial_values['poses']), x])
+    lm_new = lm
+    odom_new = np.vstack([np.array(initial_values['odom']), odom])
+    z_new = np.vstack([np.array(initial_values['meas']), z[:,0:2]])
+    
     initial_values = Values(
-        poses=[sf.V2(i,j) for i,j in x],
-        landmarks=[sf.V2(i,j) for i,j in lm],
-        odom=[sf.V2(i,j) for i,j in odom],
-        meas=[sf.V2(i,j) for i,j,k,m in z],
+        poses=[sf.V2(i,j) for i,j in x_new],
+        landmarks=[sf.V2(i,j) for i,j in lm_new],
+        odom=[sf.V2(i,j) for i,j in odom_new],
+        meas=[sf.V2(i,j) for i,j in z_new],
         epsilon=sf.numeric_epsilon,
     )
-
-    factors = []
-
-    # Bearing factors
-
+    
+    return initial_values
+def update_factor_graph(factors, x, lm, odom, z):
+    # factors: current factor graph to be updated
+    # x: Newest x,y coordinate from rover np.array([x, y]) that will be appended to old array
+    # lm: Newest SET of landmarks np.array([[x1,y1],[x2,y2],...]) that will replace old landmarks
+    # odom: Newest x,y odom from rover np.array([x, y]) that will be appended to old array
+    # z: Newest range, bearing, pose, landmark np.array([]) that will be appended to old array
     for j in range(len(z)):
         factors.append(Factor(
             residual=meas_residual,
@@ -66,17 +79,17 @@ def optimize(x,lm,odom,z):
         ))
 
     # Odometry factors
-    for i in range(len(x) - 1):
-        factors.append(Factor(
-            residual=odometry_residual,
-            keys=[f"poses[{i}]", f"poses[{i + 1}]", f"odom[{i}]", "epsilon"],
-        ))
-
+    factors.append(Factor(
+        residual=odometry_residual,
+        keys=[f"poses[{len(x)-1}]", f"poses[{len(x)}]", f"odom[{len(x)-1}]", "epsilon"],
+    ))
+    return factors
+def optimize(factors,initial_values):
     optimizer = Optimizer(
         factors=factors,
-        optimized_keys=[f"poses[{i}]" for i in range(len(x))],
+        optimized_keys=[f"poses[{i}]" for i in range(2)],
     )
-
+    #len(initial_values['poses'])
     result = optimizer.optimize(initial_values)
 
     return result
