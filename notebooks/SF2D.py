@@ -29,6 +29,7 @@ def meas_residual(
         J = e_z@Q_I@e_z.T
 
         return sf.V1(J)
+
 def odometry_residual(
         pose_0: sf.V2, pose_1: sf.V2, odom: sf.V2, epsilon: sf.Scalar, 
     ) -> sf.V1:
@@ -45,6 +46,7 @@ def odometry_residual(
         # cost
         J = e_x@R_I@e_x.T
         return sf.V1(J)
+    
 def update_init_values(initial_values, x, lm, odom, z):
     # initial_values: Previous initial value dictionary generated
     # x: Newest x,y coordinate from rover np.array([x, y]) that will be appended to old array
@@ -66,6 +68,7 @@ def update_init_values(initial_values, x, lm, odom, z):
     )
     
     return initial_values
+
 def update_factor_graph(factors, x, lm, odom, z):
     # factors: current factor graph to be updated
     # x: Newest x,y coordinate from rover np.array([x, y]) that will be appended to old array
@@ -84,10 +87,13 @@ def update_factor_graph(factors, x, lm, odom, z):
         keys=[f"poses[{len(x)-1}]", f"poses[{len(x)}]", f"odom[{len(x)-1}]", "epsilon"],
     ))
     return factors
+
 def optimize(factors,initial_values):
+    params = Optimizer.Params(verbose=False)
     optimizer = Optimizer(
         factors=factors,
         optimized_keys=[f"poses[{i}]" for i in range(2)],
+        params=params,
     )
     #len(initial_values['poses'])
     result = optimizer.optimize(initial_values)
