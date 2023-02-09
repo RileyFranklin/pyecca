@@ -161,7 +161,7 @@ def simulate(noise=None, plot=False, symf=False, tf=10):
         assoc = [ data_association(xh[-2,:], zi, lh) for zi in z ]
         
         if symf:
-            print('iteration:', i)
+            # print('iteration:', i)
             z_factor = np.zeros([len(z), 4])
             for lcv in range(len(z)):
                 z_factor[lcv, :] = np.hstack([z[lcv,:], i, assoc[lcv]])
@@ -170,29 +170,31 @@ def simulate(noise=None, plot=False, symf=False, tf=10):
                 initial_values = Values(
                     poses=[sf.V2(i,j) for i,j in xh],
                     landmarks=[sf.V2(i,j) for i,j in lh],
+                    lm=[sf.V2(i,j) for i,j in lh],
                     odom=[sf.V2(i,j) for i,j in [odom]],
                     meas=[sf.V2(i,j) for i,j in z],
                     epsilon=sf.numeric_epsilon,
                 )
                 factors = []
-            initial_values = SF2D.update_init_values(initial_values, xh[-1,:], lh, odom, z)
+            else:
+                initial_values = SF2D.update_init_values(initial_values, xh, lh, odom, z)
             factors = SF2D.update_factor_graph(factors, xh, lh, odom, z_factor)
             
-            # BEGIN JUSTIN DEBUGGING
-            print('initial_values', initial_values)
-            # Print out all keys in factors
-            print()
-            for lcv in range(len(factors)):
-                print('factors['+str(lcv)+'].keys using '+factors[lcv].name+': ', factors[lcv].keys)
-            print('\n-----------------------------------------------------\n')
-            # END JUSTIN DEBUGGING
+            # # BEGIN JUSTIN DEBUGGING
+            # print('initial_values', initial_values)
+            # # Print out all keys in factors
+            # print()
+            # for lcv in range(len(factors)):
+            #     print('factors['+str(lcv)+'].keys using '+factors[lcv].name+': ', factors[lcv].keys)
+            # print('\n-----------------------------------------------------\n')
+            # # END JUSTIN DEBUGGING
             
             optim = SF2D.optimize(factors,initial_values)
             xh = optim.optimized_values['poses']
             lh = optim.optimized_values['landmarks']
             xh = np.vstack(xh)
             lh = np.vstack(lh)
-            curr_error = optim.error()
+            curr_cost = optim.error()
         else:
             J += build_cost(
                 odom=odom,
@@ -236,7 +238,7 @@ def simulate(noise=None, plot=False, symf=False, tf=10):
             n_l = len(l)
             xh = np.reshape(optim['x'][0:2*n_t], [n_t,2])    # Best estimate of all states for all times at time i
             lh = np.reshape(optim['x'][2*n_t:None], [n_l,2]) # Best estimate of all landmarks at time i
-            curr_error = float(optim['f'])
+            curr_cost = float(optim['f'])
         xi_prev=xi #set previous state for next loop
 
         # Simulated data history
@@ -250,7 +252,7 @@ def simulate(noise=None, plot=False, symf=False, tf=10):
         # Estimator history
         hist['xh'].append(xh[-1,:])    # History of current state estimate at each time
         hist['lh'].append(lh)     # History of location landmark estimate at each time
-        hist['J'].append(curr_error)   # History of minimized cost at each time
+        hist['J'].append(curr_cost)   # History of minimized cost at each time
         for i in range(len(assoc)):
             hist['assoc'].append(assoc[i])
             
