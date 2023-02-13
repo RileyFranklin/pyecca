@@ -88,8 +88,9 @@ def measure_odom(x, x_prev, noise=None):
     theta = np.arctan2(dx[1], dx[0])
     odom = dx
     if noise is not None:
-        R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
-        odom += d*(noise['odom_std']*np.random.randn(2) + R@np.array([noise['odom_bx_bias'], noise['odom_by_bias']]))#right now this is only positive noise, only overestimates 
+        #for R matrix, make it 3x3
+        R = np.array([[np.cos(theta), -np.sin(theta), 0], [np.sin(theta), np.cos(theta), 0], [0, 0, 1]])
+        odom += d*(noise['odom_std']*np.random.randn(3) + R@np.array([noise['odom_bx_bias'], noise['odom_by_bias'], noise['odom_bz_bias']]))#right now this is only positive noise, only overestimates 
         #TODO add z noise
     return list(odom)
 
@@ -243,47 +244,49 @@ def simulate(noise=None, plot=False, symf=False, tf=10):
 
     if plot:
         fig = plt.figure(1)
-        plt.plot(l[:, 0], l[:, 1], 'bo', label='landmarks')
-        plt.plot(hist['x'][:, 0], hist['x'][:, 1], 'r.', label='states', markersize=10)
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot(l[:, 0], l[:, 1],l[:,2], 'bo', label='landmarks')
+        ax.plot(hist['x'][:, 0], hist['x'][:, 1], hist['x'][:,2], 'r.', label='states', markersize=10)
 
-        #plot odom
-        x_odom = np.array([0, 0], dtype=float)
+#         #plot odom
+        x_odom = np.array([0, 0, 0], dtype=float)
         x_odom_hist = [x_odom]
         for odom in hist['odom']:
-            x_odom = np.array(x_odom) + np.array(odom[:2])
+            x_odom = np.array(x_odom) + np.array(odom[:3])
             x_odom_hist.append(x_odom)
         x_odom_hist = np.array(x_odom_hist)
-        plt.plot(x_odom_hist[:, 0], x_odom_hist[:, 1], 'g.', linewidth=3, label='odom')
+        ax.plot(x_odom_hist[:, 0], x_odom_hist[:, 1], x_odom_hist[:,2], 'g.', linewidth=3, label='odom')
         
-        # plot best estimate history from each time step
-        plt.plot(hist['xh'][:,0], hist['xh'][:,1], 'm.', linewidth=3, label='optimal x for each time')
+         # plot best estimate history from each time step
+#         plt.plot(hist['xh'][:,0], hist['xh'][:,1], 'm.', linewidth=3, label='optimal x for each time')
         
-        # plot best estimate from the final time step
-        plt.plot(xh[:,0], xh[:,1], 'y.', linewidth=3, label='optimal x for all time')
+#         # plot best estimate from the final time step
+        ax.plot(xh[:,0], xh[:,1], xh[:,2], 'y.', linewidth=3, label='optimal x for all time')
         
-        # plot best estimate landmarks
-        plt.plot(hist['lh'][-1,:, 0], hist['lh'][-1,:, 1], 'ko', label='lh')
+#         # plot best estimate landmarks
+        ax.plot(hist['lh'][-1,:, 0], hist['lh'][-1,:, 1], hist['lh'][-1,:,2], 'ko', label='lh')
         #plt.plot(hist['lh'][-1])
+        
         # plot measurements
-        for rng, bearing, xi in hist['z']:
+        for rng, bearing, pitch, xi in hist['z']:
             xi = int(xi)
             x = hist['xh'][xi, :]
-            plt.arrow(x[0], x[1], rng*np.cos(bearing) , rng*np.sin(bearing), width=0.1,
-                          length_includes_head=True)
+            rng_xy = np.linalg.norm(x[0:1])
+            ax.quiver(x[0], x[1], x[2], rng_xy*np.cos(bearing) , rng_xy*np.sin(bearing), rng*np.sin(pitch), normalize = False)
         
 
-        # # plot measurements
-        # for rng, bearing, xi in hist['z']:
-        #     xi = int(xi)
-        #     x = x_odom_hist[xi, :]
-        #     plt.arrow(x[0], x[1], rng*np.cos(bearing) , rng*np.sin(bearing), width=0.1,
-        #                   length_includes_head=True)
+#         # # plot measurements
+#         # for rng, bearing, xi in hist['z']:
+#         #     xi = int(xi)
+#         #     x = x_odom_hist[xi, :]
+#         #     plt.arrow(x[0], x[1], rng*np.cos(bearing) , rng*np.sin(bearing), width=0.1,
+#         #                   length_includes_head=True)
 
-        # plt.axis([0, 10, 0, 10])
-        plt.axis([5, 10, 0, 2])
-        plt.grid()
-        plt.legend()
-        plt.axis('equal');
+#         # plt.axis([0, 10, 0, 10])
+#         plt.axis([5, 10, 0, 2])
+#         plt.grid()
+#         plt.legend()
+#         plt.axis('equal');
 
     return locals()
 
@@ -367,11 +370,12 @@ def build_cost(odom, lh, z1, assoc, xh0, xh1, lh_sym):
     e_x = ca.SX.zeros(1,3)
     e_x[0] = odom[0] - odom_pred[0]
     e_x[1] = odom[1] - odom_pred[1]
+    e_x[2] = odom[2] - odom_pred[2]
     J = e_x@R_I@e_x.T
 
     # for each (rng, bearing) measurement
     for j in range(len(z1)):
-        rng, bearing = z1[j, :]
+        rng, bearing, pitch = z1[j, :]
         li = assoc[j]
         
         # predicted measurement
@@ -435,6 +439,7 @@ def build_cost_land(odom, lh, z1, assoc, xh0, xh1, lh_sym):
         e_l = ca.SX.zeros(1,3)
         e_l[0] = l[0] - l_sym[0]
         e_l[1] = l[1] - l_sym[1]
+        e_l[2] = l[2] - l_sym[2]
         # cost
         J += e_l@Ql_I@e_l.T
         
