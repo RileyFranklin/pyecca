@@ -271,8 +271,12 @@ def simulate(noise=None, plot=False, symf=False, tf=10):
         for rng, bearing, pitch, xi in hist['z']:
             xi = int(xi)
             x = hist['xh'][xi, :]
-            rng_xy = np.linalg.norm(x[0:1])
-            ax.quiver(x[0], x[1], x[2], rng_xy*np.cos(bearing) , rng_xy*np.sin(bearing), rng*np.sin(pitch), normalize = False)
+            rng_xy = rng*np.cos(pitch)
+            dx= [rng_xy*np.cos(bearing) , rng_xy*np.sin(bearing), rng*np.sin(pitch)]
+            print('x:',x)
+            print('z:',dx)
+            
+            ax.quiver(x[0], x[1], x[2], dx[0] , dx[1], dx[2], normalize = False)
         
 
 #         # # plot measurements
@@ -383,7 +387,7 @@ def build_cost(odom, lh, z1, assoc, xh0, xh1, lh_sym):
         dm = lh_sym[li, :] - xh0
         z_pred[0] = ca.norm_2(dm)  # range
         z_pred[1] = ca.arctan2(dm[1], dm[0]) # bearing
-        z_pred[2] = ca.arctan2(dm[2], ca.norm_2(dm[0:1])) # pitch
+        z_pred[2] = ca.arctan2(dm[2], ca.norm_2(dm[0:2])) # pitch
 
         # error
         e_z = z1[j, :3] - z_pred
@@ -442,5 +446,5 @@ def build_cost_land(odom, lh, z1, assoc, xh0, xh1, lh_sym):
         e_l[2] = l[2] - l_sym[2]
         # cost
         J += e_l@Ql_I@e_l.T
-        
+    J=0
     return J
