@@ -57,7 +57,7 @@ def h(x, m, noise=None):
         dm[2] += noise['z_std']*np.random.randn()
     return dm
 
-def measure_landmarks(x, landmarks, noise=None, range_max=4):
+def measure_landmarks(x, landmarks, noise=None, range_max=6):
     """
     Predicts all measurements at a given state
     
@@ -68,7 +68,7 @@ def measure_landmarks(x, landmarks, noise=None, range_max=4):
     z_list = []
     for m in landmarks:
         z = h(x, m, noise=noise)
-        if z[0] < range_max:
+        if np.linalg.norm(z) < range_max:
             z_list.append(z)
     return np.array(z_list)
 
@@ -105,7 +105,8 @@ def simulate(noise=None, plot=False, plot_arrow=False,  tf=10):
         [-1,12,.5],
         [3,10,1],
         [9,10,.25],
-        [-5,15,5],
+        [-5,15,2],
+        [-5, 10, 0],
         # [-7,15],
     ])
     lh = l # + np.random.randn(*l.shape)*0.01
@@ -266,15 +267,11 @@ def simulate(noise=None, plot=False, plot_arrow=False,  tf=10):
         
         # plot measurements
         if plot_arrow:
-            for rng, bearing, pitch, xi in hist['z']:
+            for mx, my, mz, xi in hist['z']:
                 xi = int(xi)
                 x = hist['xh'][xi, :]
-                rng_xy = rng*np.cos(pitch)
-                dx= [rng_xy*np.cos(bearing) , rng_xy*np.sin(bearing), rng*np.sin(pitch)]
-                print('x:',x)
-                print('z:',dx)
 
-                ax.quiver(x[0], x[1], x[2], dx[0] , dx[1], dx[2], normalize = False)
+                ax.quiver(x[0], x[1], x[2], mx , my, mz, normalize = False)
         
 
 #         # # plot measurements
@@ -414,5 +411,4 @@ def build_cost_land(odom, lh, z1, assoc, xh0, xh1, lh_sym):
         e_l[2] = l[2] - l_sym[2]
         # cost
         J += e_l@Ql_I@e_l.T
-    J=0
     return J
