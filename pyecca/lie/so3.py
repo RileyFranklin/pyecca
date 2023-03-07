@@ -1,76 +1,71 @@
 import casadi as ca
 
-eps = 1e-7 # to avoid divide by zero
+from .matrix_lie_group import MatrixLieGroup
+from .util import series_dict
 
 
-def vee(X):
-    v = ca.SX(3, 1)
-    v[0, 0] = X[2, 1]
-    v[1, 0] = X[0, 2]
-    v[2, 0] = X[1, 0]
-    return v
+# see: https://ethaneade.com/lie.pdf
 
 
-def wedge(v):
-    X = ca.SX(3, 3)
-    X[0, 1] = -v[2]
-    X[0, 2] = v[1]
-    X[1, 0] = v[2]
-    X[1, 2] = -v[0]
-    X[2, 0] = -v[1]
-    X[2, 1] = v[0]
-    return X
+EPS = 1e-7
 
 
-class Dcm:
+class _SO3Base(MatrixLieGroup):
+    def vee(self, X):
+        v = ca.SX(3, 1)
+        v[0, 0] = X[2, 1]
+        v[1, 0] = X[0, 2]
+        v[2, 0] = X[1, 0]
+        return v
 
-    x = ca.SX.sym('x')
-    C1 = ca.Function('a', [x], [ca.if_else(ca.fabs(x) < eps, 1 - x ** 2 / 6 + x ** 4 / 120, ca.sin(x)/x)])
-    C2 = ca.Function('b', [x], [ca.if_else(ca.fabs(x) < eps, 0.5 - x ** 2 / 24 + x ** 4 / 720, (1 - ca.cos(x)) / x ** 2)])
-    C3 = ca.Function('d', [x], [ca.if_else(ca.fabs(x) < eps, 0.5 + x**2/12 + 7*x**4/720, x/(2*ca.sin(x)))])
-    del x
+    def wedge(self, v):
+        X = ca.SX(3, 3)
+        theta0 = v[0]
+        theta1 = v[1]
+        theta2 = v[2]
+        X[0, 1] = -theta2
+        X[0, 2] = theta1
+        X[1, 0] = theta2
+        X[1, 2] = -theta0
+        X[2, 0] = -theta1
+        X[2, 1] = theta0
+        return X
 
-    group_shape = (3, 3)
-    group_params = 9
-    algebra_params = 3
 
+class _Dcm(_SO3Base):
     def __init__(self):
-        raise RuntimeError('this class is just for scoping, do not instantiate')
+        super().__init__(group_params=9, algebra_params=3, group_shape=(3, 3))
 
-    @classmethod
-    def check_group_shape(cls, a):
-        assert a.shape == cls.group_shape or a.shape == (cls.group_shape[0],)
+    def identity(self) -> ca.SX:
+        return ca.SX.eye(3)
 
-    @classmethod
-    def product(cls, a, b):
-        cls.check_group_shape(a)
-        cls.check_group_shape(b)
-        return ca.mtimes(a, b)
+    def product(self, a, b):
+        self.check_group_shape(a)
+        self.check_group_shape(b)
+        return a @ b
 
-    @classmethod
-    def inv(cls, a):
-        cls.check_group_shape(a)
+    def inv(self, a):
+        self.check_group_shape(a)
         return ca.transpose(a)
 
-    @classmethod
-    def exp(cls, v):
+    def exp(self, v):
         theta = ca.norm_2(v)
-        X = wedge(v)
-        return ca.SX.eye(3) + cls.C1(theta)*X + cls.C2(theta)*ca.mtimes(X, X)
+        X = self.wedge(v)
+        A = series_dict["sin(x)/x"]
+        B = series_dict["(1 - cos(x))/x^2"]
+        return ca.SX.eye(3) + A(theta) * X + B(theta) * X @ X
 
-    @classmethod
-    def log(cls, R):
+    def log(self, R):
         theta = ca.arccos((ca.trace(R) - 1) / 2)
-        return vee(cls.C3(theta) * (R - R.T))
+        A = series_dict["sin(x)/x"]
+        return self.vee((R - R.T) / (A(theta) * 2))
 
-    @classmethod
-    def kinematics(cls, R, w):
+    def kinematics(self, R, w):
         assert R.shape == (3, 3)
         assert w.shape == (3, 1)
-        return ca.mtimes(R, wedge(w))
+        return R @ self.wedge(w)
 
-    @classmethod
-    def from_quat(cls, q):
+    def from_quat(self, q):
         assert q.shape == (4, 1)
         R = ca.SX(3, 3)
         a = q[0]
@@ -98,33 +93,28 @@ class Dcm:
         R[2, 2] = aa + dd - bb - cc
         return R
 
-    @classmethod
-    def from_mrp(cls, r):
+    def from_mrp(self, r):
         assert r.shape == (4, 1)
         a = r[:3]
-        X = wedge(a)
+        X = self.wedge(a)
         n_sq = ca.dot(a, a)
-        X_sq = ca.mtimes(X, X)
+        X_sq = X @ X
         R = ca.SX.eye(3) + (8 * X_sq - 4 * (1 - n_sq) * X) / (1 + n_sq) ** 2
         # return transpose, due to convention difference in book
         return R.T
 
-    @classmethod
-    def from_euler(cls, e):
-        return cls.from_quat(Quat.from_euler(e))
+    def from_euler(self, e):
+        return self.from_quat(Quat.from_euler(e))
 
 
-class Mrp:
+Dcm = _Dcm()
 
-    group_shape = (4, 1)
-    group_params = 4
-    algebra_params = 3
 
+class _Mrp(_SO3Base):
     def __init__(self):
-        raise RuntimeError('this class is just for scoping, do not instantiate')
+        super().__init__(group_params=4, algebra_params=3, group_shape=(4, 1))
 
-    @classmethod
-    def product(cls, r1, r2):
+    def product(self, r1, r2):
         assert r1.shape == (4, 1) or r1.shape == (4,)
         assert r2.shape == (4, 1) or r2.shape == (4,)
         a = r1[:3]
@@ -132,33 +122,29 @@ class Mrp:
         na_sq = ca.dot(a, a)
         nb_sq = ca.dot(b, b)
         res = ca.SX(4, 1)
-        den = (1 + na_sq * nb_sq - 2 * ca.dot(b, a))
+        den = 1 + na_sq * nb_sq - 2 * ca.dot(b, a)
         res[:3] = ((1 - na_sq) * b + (1 - nb_sq) * a - 2 * ca.cross(b, a)) / den
         res[3] = 0  # shadow state
         return res
 
-    @classmethod
-    def inv(cls, r):
+    def inv(self, r):
         assert r.shape == (4, 1) or r.shape == (4,)
         return ca.vertcat(-r[:3], r[3])
 
-    @classmethod
-    def exp(cls, v):
+    def exp(self, v):
         assert v.shape == (3, 1) or v.shape == (3,)
         angle = ca.norm_2(v)
         res = ca.SX(4, 1)
         res[:3] = ca.tan(angle / 4) * v / angle
         res[3] = 0
-        return ca.if_else(angle > eps, res, ca.SX([0, 0, 0, 0]))
+        return ca.if_else(angle > EPS, res, ca.SX([0, 0, 0, 0]))
 
-    @classmethod
-    def log(cls, r):
+    def log(self, r):
         assert r.shape == (4, 1) or r.shape == (4,)
         n = ca.norm_2(r[:3])
-        return ca.if_else(n > eps, 4 * ca.atan(n) * r[:3] / n, ca.SX([0, 0, 0]))
+        return ca.if_else(n > EPS, 4 * ca.atan(n) * r[:3] / n, ca.SX([0, 0, 0]))
 
-    @classmethod
-    def shadow(cls, r):
+    def shadow(self, r):
         assert r.shape == (4, 1) or r.shape == (4,)
         n_sq = ca.dot(r[:3], r[:3])
         res = ca.SX(4, 1)
@@ -166,23 +152,20 @@ class Mrp:
         res[3] = ca.logic_not(r[3])
         return res
 
-    @classmethod
-    def shadow_if_necessary(cls, r):
+    def shadow_if_necessary(self, r):
         assert r.shape == (4, 1) or r.shape == (4,)
-        return ca.if_else(ca.norm_2(r[:3]) > 1, cls.shadow(r), r)
+        return ca.if_else(ca.norm_2(r[:3]) > 1, self.shadow(r), r)
 
-    @classmethod
-    def kinematics(cls, r, w):
+    def kinematics(self, r, w):
         assert r.shape == (4, 1) or r.shape == (4,)
         assert w.shape == (3, 1) or w.shape == (3,)
         a = r[:3]
         n_sq = ca.dot(a, a)
-        X = wedge(a)
-        B = 0.25 * ((1 - n_sq) * ca.SX.eye(3) + 2 * X + 2 * ca.mtimes(a, ca.transpose(a)))
-        return ca.vertcat(ca.mtimes(B, w), 0)
+        X = self.wedge(a)
+        B = 0.25 * ((1 - n_sq) * ca.SX.eye(3) + 2 * X + 2 * a @ a.T)
+        return ca.vertcat(B @ w, 0)
 
-    @classmethod
-    def from_quat(cls, q):
+    def from_quat(self, q):
         assert q.shape == (4, 1) or q.shape == (4,)
         x = ca.SX(4, 1)
         den = 1 + q[0]
@@ -190,30 +173,31 @@ class Mrp:
         x[1] = q[2] / den
         x[2] = q[3] / den
         x[3] = 0
-        r = cls.shadow_if_necessary(x)
+        r = self.shadow_if_necessary(x)
         r[3] = 0
         return r
 
-    @classmethod
-    def from_dcm(cls, R):
-        return cls.from_quat(Quat.from_dcm(R))
+    def from_dcm(self, R):
+        return self.from_quat(Quat.from_dcm(R))
 
-    @classmethod
-    def from_euler(cls, e):
-        return cls.from_quat(Quat.from_euler(e))
+    def from_euler(self, e):
+        return self.from_quat(Quat.from_euler(e))
+
+    def identity(self) -> ca.SX:
+        return ca.SX([0, 0, 0, 0])
 
 
-class Quat:
+Mrp = _Mrp()
 
-    group_shape = (4, 1)
-    group_params = 4
-    algebra_params = 3
 
+class _Quat(_SO3Base):
     def __init__(self):
-        raise RuntimeError('this class is just for scoping, do not instantiate')
+        super().__init__(group_params=4, algebra_params=3, group_shape=(4, 1))
 
-    @classmethod
-    def product(cls, a, b):
+    def identity(self) -> ca.SX:
+        return ca.SX([1, 0, 0, 0])
+
+    def product(self, a, b):
         assert a.shape == (4, 1) or a.shape == (4,)
         assert b.shape == (4, 1) or b.shape == (4,)
         r1 = a[0]
@@ -225,44 +209,40 @@ class Quat:
         res[1:] = r1 * v2 + r2 * v1 + ca.cross(v1, v2)
         return res
 
-    @classmethod
-    def inv(cls, q):
+    def inv(self, q):
         assert q.shape == (4, 1) or q.shape == (4,)
         qi = ca.SX(4, 1)
         n = ca.norm_2(q)
-        qi[0] = q[0]/n
-        qi[1] = -q[1]/n
-        qi[2] = -q[2]/n
-        qi[3] = -q[3]/n
+        qi[0] = q[0] / n
+        qi[1] = -q[1] / n
+        qi[2] = -q[2] / n
+        qi[3] = -q[3] / n
         return qi
 
-    @classmethod
-    def exp(cls, v):
+    def exp(self, v):
         assert v.shape == (3, 1) or q.shape == (3,)
         q = ca.SX(4, 1)
         theta = ca.norm_2(v)
-        q[0] = ca.cos(theta/2)
-        c = ca.sin(theta/2)
+        q[0] = ca.cos(theta / 2)
+        c = ca.sin(theta / 2)
         n = ca.norm_2(v)
-        q[1] = c*v[0]/n
-        q[2] = c*v[1]/n
-        q[3] = c*v[2]/n
-        return ca.if_else(n > eps, q, ca.SX([1, 0, 0, 0]))
+        q[1] = c * v[0] / n
+        q[2] = c * v[1] / n
+        q[3] = c * v[2] / n
+        return ca.if_else(n > EPS, q, ca.SX([1, 0, 0, 0]))
 
-    @classmethod
-    def log(cls, q):
+    def log(self, q):
         assert q.shape == (4, 1) or q.shape == (4,)
         v = ca.SX(3, 1)
         norm_q = ca.norm_2(q)
-        theta = 2*ca.acos(q[0])
-        c = ca.sin(theta/2)
-        v[0] = theta*q[1]/c
-        v[1] = theta*q[2]/c
-        v[2] = theta*q[3]/c
-        return ca.if_else(ca.fabs(c) > eps, v, ca.SX([0, 0, 0]))
+        theta = 2 * ca.acos(q[0])
+        c = ca.sin(theta / 2)
+        v[0] = theta * q[1] / c
+        v[1] = theta * q[2] / c
+        v[2] = theta * q[3] / c
+        return ca.if_else(ca.fabs(c) > EPS, v, ca.SX([0, 0, 0]))
 
-    @classmethod
-    def kinematics(cls, q, w):
+    def kinematics(self, q, w):
         """
         The kinematic equation relating the time derivative of quat given the current quat and the angular velocity
         in the body frame.
@@ -277,22 +257,20 @@ class Quat:
         v[1] = w[0]
         v[2] = w[1]
         v[3] = w[2]
-        return 0.5 * cls.product(q, v)
+        return 0.5 * self.product(q, v)
 
-    @classmethod
-    def from_mrp(cls, r):
+    def from_mrp(self, r):
         assert r.shape == (4, 1) or r.shape == (4,)
         a = r[:3]
         q = ca.SX(4, 1)
         n_sq = ca.dot(a, a)
         den = 1 + n_sq
-        q[0] = (1 - n_sq)/den
+        q[0] = (1 - n_sq) / den
         for i in range(3):
-            q[i + 1] = 2*a[i]/den
+            q[i + 1] = 2 * a[i] / den
         return ca.if_else(r[3], -q, q)
 
-    @classmethod
-    def from_dcm(cls, R):
+    def from_dcm(self, R):
         assert R.shape == (3, 3)
         b1 = 0.5 * ca.sqrt(1 + R[0, 0] + R[1, 1] + R[2, 2])
         b2 = 0.5 * ca.sqrt(1 + R[0, 0] - R[1, 1] - R[2, 2])
@@ -324,56 +302,73 @@ class Quat:
         q4[3] = b4
 
         q = ca.if_else(
-            ca.trace(R) > 0, q1,
-            ca.if_else(ca.logic_and(R[0, 0] > R[1, 1], R[0, 0] > R[2, 2]), q2,
-            ca.if_else(R[1, 1] > R[2, 2], q3, q4)))
+            ca.trace(R) > 0,
+            q1,
+            ca.if_else(
+                ca.logic_and(R[0, 0] > R[1, 1], R[0, 0] > R[2, 2]),
+                q2,
+                ca.if_else(R[1, 1] > R[2, 2], q3, q4),
+            ),
+        )
         return q
 
-    @classmethod
-    def from_euler(cls, e):
+    def from_euler(self, e):
         assert e.shape == (3, 1) or e.shape == (3,)
         q = ca.SX(4, 1)
-        cosPhi_2 = ca.cos(e[0]/2)
-        cosTheta_2 = ca.cos(e[1]/2)
-        cosPsi_2 = ca.cos(e[2]/2)
-        sinPhi_2 = ca.sin(e[0]/2)
-        sinTheta_2 = ca.sin(e[1]/2)
-        sinPsi_2 = ca.sin(e[2]/2)
-        q[0] = cosPhi_2 * cosTheta_2 * cosPsi_2 + \
-               sinPhi_2 * sinTheta_2 * sinPsi_2
-        q[1] = sinPhi_2 * cosTheta_2 * cosPsi_2 - \
-               cosPhi_2 * sinTheta_2 * sinPsi_2
-        q[2] = cosPhi_2 * sinTheta_2 * cosPsi_2 + \
-               sinPhi_2 * cosTheta_2 * sinPsi_2
-        q[3] = cosPhi_2 * cosTheta_2 * sinPsi_2 - \
-               sinPhi_2 * sinTheta_2 * cosPsi_2
+        cosPhi_2 = ca.cos(e[0] / 2)
+        cosTheta_2 = ca.cos(e[1] / 2)
+        cosPsi_2 = ca.cos(e[2] / 2)
+        sinPhi_2 = ca.sin(e[0] / 2)
+        sinTheta_2 = ca.sin(e[1] / 2)
+        sinPsi_2 = ca.sin(e[2] / 2)
+        q[0] = cosPhi_2 * cosTheta_2 * cosPsi_2 + sinPhi_2 * sinTheta_2 * sinPsi_2
+        q[1] = sinPhi_2 * cosTheta_2 * cosPsi_2 - cosPhi_2 * sinTheta_2 * sinPsi_2
+        q[2] = cosPhi_2 * sinTheta_2 * cosPsi_2 + sinPhi_2 * cosTheta_2 * sinPsi_2
+        q[3] = cosPhi_2 * cosTheta_2 * sinPsi_2 - sinPhi_2 * sinTheta_2 * cosPsi_2
         return q
 
 
-class Euler:
+Quat = _Quat()
 
-    group_params = 3
-    algebra_params = 3
 
-    @classmethod
-    def from_quat(cls, q):
+class _Euler(_SO3Base):
+    def __init__(self):
+        super().__init__(group_params=3, algebra_params=3, group_shape=(3, 1))
+
+    def inv(self, e):
+        return Euler.from_dcm(Dcm.inv(Dcm.from_euler(e)))
+
+    def exp(self, v):
+        return Euler.from_dcm(Dcm.exp(v))
+
+    def log(self, e):
+        return Dcm.log(Dcm.from_euler(e))
+
+    def product(self, a, b):
+        return Euler.from_dcm(Dcm.from_euler(a) @ Dcm.from_euler(b))
+
+    def identity(self) -> ca.SX:
+        return ca.SX([0, 0, 0])
+
+    def from_quat(self, q):
         assert q.shape == (4, 1) or q.shape == (4,)
         e = ca.SX(3, 1)
         a = q[0]
         b = q[1]
         c = q[2]
         d = q[3]
-        e[0] = ca.atan2(2 * (a * b + c * d), 1 - 2 * (b ** 2 + c ** 2))
+        e[0] = ca.atan2(2 * (a * b + c * d), 1 - 2 * (b**2 + c**2))
         e[1] = ca.asin(2 * (a * c - d * b))
-        e[2] = ca.atan2(2 * (a * d + b * c), 1 - 2 * (c ** 2 + d ** 2))
+        e[2] = ca.atan2(2 * (a * d + b * c), 1 - 2 * (c**2 + d**2))
         return e
 
-    @classmethod
-    def from_dcm(cls, R):
+    def from_dcm(self, R):
         assert R.shape == (3, 3)
-        return cls.from_quat(Quat.from_dcm(R))
+        return self.from_quat(Quat.from_dcm(R))
 
-    @classmethod
-    def from_mrp(cls, a):
+    def from_mrp(self, a):
         assert a.shape == (4, 1) or a.shape == (4,)
-        return cls.from_quat(Quat.from_mrp(a))
+        return self.from_quat(Quat.from_mrp(a))
+
+
+Euler = _Euler()

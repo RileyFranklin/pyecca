@@ -35,28 +35,42 @@ Operating System :: MacOS
 
 # pylint: disable=invalid-name
 
+package_name = "pyecca"
 
 setup(
-    name='pyecca',
+    name=package_name,
     maintainer="James Goppert",
     maintainer_email="james.goppert@gmail.com",
     description=DOCLINES[0],
     long_description="\n".join(DOCLINES[2:]),
-    url='https://github.com/jgoppert/pyecca',
-    author='James Goppert',
-    author_email='james.goppert@gmail.com',
-    download_url='https://github.com/jgoppert/pyecca',
-    license='BSD 3-Clause',
-    classifiers=[_f for _f in CLASSIFIERS.split('\n') if _f],
+    url="https://github.com/jgoppert/pyecca",
+    author="James Goppert",
+    author_email="james.goppert@gmail.com",
+    download_url="https://github.com/jgoppert/pyecca",
+    license="BSD 3-Clause",
+    classifiers=[_f for _f in CLASSIFIERS.split("\n") if _f],
     platforms=["Windows", "Linux", "Solaris", "Mac OS-X", "Unix"],
     install_requires=[
-        'scipy', 'numpy', 'casadi', 'pydot', 'matplotlib', 'simpy', 'pyulog'],
-    setup_requires=['pytest-runner'],
-    tests_require=['pytest'],
-    #entry_points={
+        "scipy",
+        "numpy",
+        "casadi",
+        "pydot",
+        "matplotlib",
+        "simpy",
+        "pyulog",
+    ],
+    setup_requires=["pytest-runner"],
+    tests_require=["pytest"],
+    # entry_points={
     #    'console_scripts': ['example=pyecca.example:main'],
-    #},
+    # },
     packages=find_packages(),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
+    zip_safe=True,
 )
