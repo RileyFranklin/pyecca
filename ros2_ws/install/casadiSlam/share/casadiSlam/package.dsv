@@ -1,0 +1,6 @@
+source;share/casadiSlam/hook/pythonpath.ps1
+source;share/casadiSlam/hook/pythonpath.dsv
+source;share/casadiSlam/hook/pythonpath.sh
+source;share/casadiSlam/hook/ament_prefix_path.ps1
+source;share/casadiSlam/hook/ament_prefix_path.dsv
+source;share/casadiSlam/hook/ament_prefix_path.sh
