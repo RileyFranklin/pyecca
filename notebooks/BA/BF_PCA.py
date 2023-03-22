@@ -2,6 +2,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import casadi as ca
 import time
+import sys
+sys.path.insert(0, '../../')
+from pyecca.lie import se3, so3, matrix_lie_group
 
 
 def euler2rot(psi, theta, phi):
@@ -110,6 +113,67 @@ def build_cost(points_0, points_1, all_sym):
     
     # Combine into tranformation matrix, SE(3)
     T_sym = ca.vertcat(ca.horzcat(R_sym, t_sym), last_row)
+                        
+    # compute cost
+    J = ca.SX.zeros(1,1)
+        
+    # Landmark moving cost
+    for k in range(len(points_0)):
+        # Create P_0
+        P_0 = ca.SX.zeros(4,1)
+        P_0[0,0] = points_0[k,0]
+        P_0[1,0] = points_0[k,1]
+        P_0[2,0] = points_0[k,2]
+        P_0[3,0] = 1.0
+        # Create P_1
+        P_1 = ca.SX.zeros(4,1)
+        P_1[0,0] = points_1[k,0]
+        P_1[1,0] = points_1[k,1]
+        P_1[2,0] = points_1[k,2]
+        P_1[3,0] = 1.0
+        # error
+        e = P_1 - T_sym@P_0
+        # cost
+        J += e.T@Q_I@e
+        
+    return J
+
+def build_cost_pyecca(points_0, points_1, all_sym):
+    """
+    @param points_0 : n x 3 numpy matrix of points observed at pose 0
+    @param points_1 : n x 3 numpy matrix of points observed at pose 1
+    @param all_sym : all symbolic -> symbolic lie algebra vector
+    """
+    
+    # covariance for points
+    Q = ca.SX(4, 4) 
+    std = 1
+    Q[0, 0] = std**2
+    Q[1, 1] = std**2
+    Q[2, 2] = std**2
+    Q[3, 3] = std**2
+    Q_I = ca.inv(Q)
+    
+#     # Form symbolic transformation matrix (OLD)
+#     # Rotation matrix, SO(3)
+#     R_sym = euler2rot_casadi(all_sym[0], all_sym[1], all_sym[2])
+    
+#     # Translation
+#     t_sym = ca.SX.zeros(3,1)
+#     t_sym[0] = all_sym[3]
+#     t_sym[1] = all_sym[4]
+#     t_sym[2] = all_sym[5]
+    
+#     # Last row
+#     last_row = ca.SX.zeros(1,4)
+#     last_row[0,3] = 1.0
+    
+#     # Combine into tranformation matrix, SE(3)
+#     T_sym = ca.vertcat(ca.horzcat(R_sym, t_sym), last_row)
+
+    # Form symbolic transformation matrix using pyecca
+    SE3 = se3._SE3()
+    T_sym = SE3.exp(SE3.wedge(all_sym))
                         
     # compute cost
     J = ca.SX.zeros(1,1)
