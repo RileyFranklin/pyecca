@@ -68,21 +68,12 @@ def applyT(points, T):
     
     return new_points
 
-def build_cost_barfoot(Top , p , y, assoc, epsilon):
+def build_cost_barfoot(Top , p , y, assoc, weight, epsilon):
     """
     Top: Transformation Matrix
     p: landmarks 1,..,j observed at time k
     y: measurement 1,...,j at time k
     """
-    
-    # covariance for points
-    Q = ca.SX(4, 4) 
-    std = 1
-    Q[0, 0] = std**2
-    Q[1, 1] = std**2
-    Q[2, 2] = std**2
-    Q[3, 3] = std**2
-    Q_I = ca.inv(Q)
     
     # Form symbolic transformation matrix using pyecca
     SE3 = se3._SE3()
@@ -109,6 +100,9 @@ def build_cost_barfoot(Top , p , y, assoc, epsilon):
         yj[3,0] = 1.0
         e_y = ca.SX.zeros(1,3)
         
+        #weight of landmark j
+        wj = weight[li]
+        
         # compute operating point zj
         zj = Top@pj
         
@@ -116,7 +110,7 @@ def build_cost_barfoot(Top , p , y, assoc, epsilon):
         e = (yj - zj) - SE3.wedge(epsilon)@zj
         
         # compute cost
-        J += e.T@Q_I@e
+        J += 1/2*wj*e.T@e
         
     return J
 
