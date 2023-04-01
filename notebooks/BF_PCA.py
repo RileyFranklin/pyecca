@@ -216,6 +216,65 @@ def data_association(x: np.array, z: np.array, landmarks: np.array, Rot):
     J_list = np.array(J_list)
     i = np.argmin(J_list)
     return i
+
+def noisy_sig(sig, k, dt):
+    return np.fft.ifft(np.fft.fft(sig)*dt + np.fft.fft(np.random.normal(scale= k*np.max(sig), size=len(sig)))*dt)/dt
             
+    
+def Ad(T):
+    #Initialize Lie Group
+    SO3 = so3._Dcm()
+    
+    C = T[:3,:3]
+    r = T[:3,3]
+    return ca.vertcat(ca.horzcat(C, SO3.wedge(r)@C), ca.horzcat(ca.SX.zeros(3,3),C))
+
+def barfoot_solve(Top, p, y, assoc, weight):
+    #Initialize Lie Group
+    SE3 = se3._SE3()
+    SO3 = so3._Dcm()
+    
+    #the incorporated weights assume that every landmark is observed len(y) = len(w) = len(p)
+    Tau = Ad(Top)
+    Cop = Top[:3,:3]
+    rop = (-Cop.T@Top[:3,3])
+    
+    w = np.sum(weight)
+    P = ca.SX(np.average(p,axis=0, weights=weight))
+    Y = ca.SX(np.average(y,axis=0, weights=weight))
+    
+    I = 0
+    for j in range(len(p)):
+        pint0=(p[j] - P)
+        wj = weight[j]
+        I += wj*SO3.wedge(pint0)@SO3.wedge(pint0)
+    I=-I/w
+    
+    M1 = ca.vertcat(ca.horzcat(ca.SX.eye(3), ca.SX.zeros(3,3)), ca.horzcat(SO3.wedge(P),ca.SX.eye(3)))
+    M2 = ca.vertcat(ca.horzcat(ca.SX.eye(3), ca.SX.zeros(3,3)), ca.horzcat(ca.SX.zeros(3,3),I))
+    M3 = ca.vertcat(ca.horzcat(ca.SX.eye(3), -SO3.wedge(P)), ca.horzcat(ca.SX.zeros(3,3),ca.SX.eye(3)))
+    M=M1@M2@M3
+    
+    W = 0
+    for j in range(len(y)):
+        li = assoc[j]
+        pj = p[li]
+        yj = y[j]
+        wj = weight[li]
+        
+        W += wj*(yj-Y)@(pj-P).T  
+    W = W/w
+    
+    b=ca.SX.zeros(1,3)
+    b[0] = ca.trace(SO3.wedge([1,0,0])@Cop@W.T)
+    b[1] = ca.trace(SO3.wedge([0,1,0])@Cop@W.T)
+    b[2] = ca.trace(SO3.wedge([0,0,1])@Cop@W.T) 
+
+    a=ca.vertcat(Y-Cop@(P-rop),b.T-SO3.wedge(Y)@Cop@(P-rop))
+    
+    #Optimizied pertubation point
+    eopt=Tau@ca.inv(M)@Tau.T@a
+    
+    return eopt
     
     
