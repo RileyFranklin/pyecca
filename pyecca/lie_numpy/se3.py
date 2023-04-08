@@ -49,7 +49,7 @@ class _SE3(MatrixLieGroup):
         """
         This takes in an element of the SE3 Lie Group (Wedge Form) and returns the se3 Lie Algebra elements
         """
-        v = np.zeros(6)
+        v = np.zeros([6,1])
         v[0] = X[0, 3]  # x
         v[1] = X[1, 3]  # y
         v[2] = X[2, 3]  # z
@@ -83,7 +83,7 @@ class _SE3(MatrixLieGroup):
         )  # theta term using norm for sqrt(theta1**2+theta2**2+theta3**2)
 
         # translational components u
-        u = np.zeros(3)
+        u = np.zeros([3,1])
         u[0] = v[0]
         u[1] = v[1]
         u[2] = v[2]
@@ -101,7 +101,7 @@ class _SE3(MatrixLieGroup):
 
         V = np.eye(3) + B * X_so3 + C * X_so3 @ X_so3
 
-        horz = np.hstack([R, np.matmul(V, u).reshape((3,1))])
+        horz = np.hstack([R, np.matmul(V, u)])
 
         lastRow = np.array([0, 0, 0, 1])
 
@@ -138,13 +138,13 @@ class _SE3(MatrixLieGroup):
             + (1 / theta**2) * (1 - A / (2 * B)) * wSkew @ wSkew
         )
 
-        t = np.zeros(3)
+        t = np.zeros([3,1])
         t[0] = G[0, 3]
         t[1] = G[1, 3]
         t[2] = G[2, 3]
 
         uInv = V_inv @ t
-        horz2 = np.hstack([wSkew, uInv.reshape((3,1))])
+        horz2 = np.hstack([wSkew, uInv])
         lastRow2 = np.array([0, 0, 0, 0])
         return np.vstack([horz2, lastRow2])
 

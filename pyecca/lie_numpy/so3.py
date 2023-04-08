@@ -10,7 +10,7 @@ EPS = 1e-7
 
 class _SO3Base(MatrixLieGroup):
     def vee(self, X):
-        v = np.zeros(3)
+        v = np.zeros([3,1])
         v[0] = X[2, 1]
         v[1] = X[0, 2]
         v[2] = X[1, 0]
