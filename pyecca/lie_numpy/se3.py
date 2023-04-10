@@ -126,7 +126,7 @@ class _SE3(MatrixLieGroup):
         R = G[:3, :3]
         theta = np.arccos((np.trace(R) - 1) / 2)
         wSkew = so3.Dcm.wedge(so3.Dcm.log(R))
-        
+
         if theta < EPS:
             theta = EPS
         
