@@ -49,22 +49,24 @@ class _Dcm(_SO3Base):
     def exp(self, v): #Technically exp-wedge (Takes in 3x1 vee input)
         theta = np.linalg.norm(v) #This might not be equivalent to norm_2 (need to recheck)
         X = self.wedge(v)
+        
+        if theta < EPS:
+            theta = EPS
+        
         A = np.sin(theta)
         A = series_dict["sin(x)/x"]
         B = series_dict["(1 - cos(x))/x^2"]
-        
-        if theta == 0:
-            theta = EPS
         
         return np.eye(3) + A(theta) * X + B(theta) * X @ X
 
     def log(self, R): #Techically log-vee (Output the 3x1 vector)
         theta = np.arccos((np.trace(R) - 1) / 2)
-        A = series_dict["sin(x)/x"]
         
-        if theta == 0:
+        if theta < EPS:
             theta = EPS
-        
+
+        A = series_dict["sin(x)/x"]
+      
         return self.vee((R - R.T) / (A(theta) * 2))
 
 Dcm = _Dcm()
