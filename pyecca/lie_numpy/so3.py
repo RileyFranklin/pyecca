@@ -53,7 +53,7 @@ class _Dcm(_SO3Base):
         A = series_dict["sin(x)/x"]
         B = series_dict["(1 - cos(x))/x^2"]
         
-        if theta < EPS:
+        if np.abs(theta) < EPS:
             theta = EPS
         
         return np.eye(3) + A(theta) * X + B(theta) * X @ X
@@ -62,7 +62,7 @@ class _Dcm(_SO3Base):
         theta = np.arccos((np.trace(R) - 1) / 2)
         A = series_dict["sin(x)/x"]
         
-        if theta < EPS:
+        if np.abs(theta) < EPS:
             theta = EPS
         
         return self.vee((R - R.T) / (A(theta) * 2))
