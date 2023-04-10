@@ -92,7 +92,7 @@ class _SE3(MatrixLieGroup):
             v_so3
         )  #'Dcm' for direction cosine matrix representation of so3 LieGroup Rotational
 
-        if theta == 0:
+        if theta < 0:
             theta = EPS
         
         A = series_dict["sin(x)/x"](theta)
@@ -127,7 +127,7 @@ class _SE3(MatrixLieGroup):
         theta = np.arccos((np.trace(R) - 1) / 2)
         wSkew = so3.Dcm.wedge(so3.Dcm.log(R))
         
-        if theta == 0:
+        if theta < 0:
             theta = EPS
         
         A = series_dict["sin(x)/x"](theta)
